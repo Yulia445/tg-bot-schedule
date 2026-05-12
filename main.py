@@ -69,6 +69,8 @@ async def handle_ai(message: types.Message):
 - Українська мова -> Соловій У.В.
 - Критичне мислення -> Надурак В.В.
 - Основи роботи з нейронними мережами -> Головчук П.В.
+- Основи програмування -> Піцур М.Р.
+- Англійська мова-> Куцела М.М.
 
 ПРАВИЛА:
 1. Якщо Юля каже СКАСУВАТИ пару — використовуй [CANCEL:Предмет:День].
@@ -83,28 +85,8 @@ async def handle_ai(message: types.Message):
 - [DELETE_ALL:День]
 - [CLEAR_EVERYTHING]
 
-ПРАВИЛА СКАСУВАННЯ:
-- Якщо Юля просить скасувати пару (наприклад "четверту" або "матан"), пиши: [CANCEL:ЩоСкасувати:День]
-- В поле "ЩоСкасувати" пиши або назву предмета, або НОМЕР ПАРИ (наприклад, "13:30" або "четверту"), якщо назва нечітка.
-
-ПРИКЛАД:
-Юля: "скасуй 4 пару в п'ятницю"
-Бот: [CANCEL:13:30:П'ятниця] 
-(Бо 4 пара за часом це 13:30)
-
-...
-ПРАВИЛА ДЛЯ ЧАСУ:
-1 пара: 08:30
-2 пара: 10:00
-3 пара: 12:00
-4 пара: 13:30
-5 пара: 15:10
-
-Якщо Юля каже "скасуй 4 пару", ти маєш видати команду: [CANCEL:13:30:П'ятниця]
-Ніколи не пиши просто число "13" або "None". Використовуй тільки повний час або назву предмета.
-
 КОНТЕКСТ РОЗКЛАДУ: {current_sched}
-Текст Юлі: "{message.text} """
+Текст Юлі: "{message.text}" """
 
     try:
         response = await get_groq_completion([
@@ -127,15 +109,6 @@ async def handle_ai(message: types.Message):
                 clear_completely()
                 status_executed = True
                 chat_reply.append("🧹 Розклад очищено!")
-
-            elif "[UNCANCEL:" in upper:
-                try:
-                    p = line.split("[UNCANCEL:")[1].split("]")[0].split(":")
-                    from database import smart_uncancel # імпортуй її
-                    smart_uncancel(p[0].strip(), p[1].strip())
-                    status_executed = True
-                    chat_reply.append(f"✅ Повернув у розклад: {p[0]}")
-                except: pass    
             
             elif "DELETE_ALL:" in upper or "DELETE:ALL:" in upper:
                 try:
