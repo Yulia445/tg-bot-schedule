@@ -10,7 +10,6 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# Імпорт функцій з твого файлу database.py
 from database import (init_db, get_db_schedule, clear_completely, 
                       delete_all_in_day, smart_delete, smart_cancel, 
                       add_lesson, format_schedule_text)
@@ -52,14 +51,12 @@ async def show_s(m: types.Message):
 
 @dp.message()
 async def handle_ai(message: types.Message):
-    # Лог для перевірки в терміналі VS Code
     print(f"DEBUG: Від {message.from_user.id}: {message.text}")
     
     if message.from_user.id != ADMIN_ID: return
 
     current_sched = str(get_db_schedule())
     
-    # ТУТ ТВІЙ СПИСОК ВИКЛАДАЧІВ (тепер він у промпті, щоб бот не тупив)
     prompt = f"""Ти — Support Bro. Допомагай Юлі з розкладом.
 Твоє завдання: видавати ТІЛЬКИ команди в квадратних дужках.
 
