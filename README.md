@@ -58,3 +58,24 @@ database.py — робота з БД SQLite, форматування текст
 university.db — файл бази даних (створюється автоматично при першому запуску).
 
 .env — конфігураційний файл для ключів (необхідно створити власноруч).
+
+
+## 📐 Архітектура системи
+
+```mermaid
+graph LR
+    User((👤 Користувач)) -->|Повідомлення| Bot[🤖 Schedule Bot]
+    
+    subgraph Processing [Обробка та Логіка]
+        Bot -->|Запит| LLM{🧠 Groq / Llama 3}
+        LLM -->|Команда| Bot
+        Bot -->|SQL Запит| DB[(🗄 SQLite DB)]
+        DB -->|Дані розкладу| Bot
+    end
+    
+    Bot -->|Стікер або Текст| User
+
+    %% Строгі кольори
+    style Bot fill:#1a2a40,stroke:#333,color:#fff,stroke-width:2px
+    style LLM fill:#e2e8f0,stroke:#333,color:#000
+    style DB fill:#718096,stroke:#333,color:#fff
