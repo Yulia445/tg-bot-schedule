@@ -6,7 +6,6 @@ LESSON_TIMES = {
     "5": "15:10-16:30", "6": "16:40-18:00", "7": "18:10-19:30", "8": "19:40-21:00"
 }
 
-# Порядок днів тижня для сортування
 DAYS_ORDER = {
     "Понеділок": 1, "Вівторок": 2, "Середа": 3, 
     "Четвер": 4, "П'ятниця": 5, "Субота": 6, "Неділя": 7
@@ -23,12 +22,9 @@ def init_db():
 def get_db_schedule():
     conn = sqlite3.connect('university.db')
     cursor = conn.cursor()
-    # Витягуємо всі дані
     cursor.execute("SELECT day_of_week, lesson_time, subject, teacher, location, is_cancelled, lesson_type FROM schedule")
     rows = cursor.fetchall()
     conn.close()
-    
-    # Сортуємо в Python за допомогою нашого словника DAYS_ORDER
     return sorted(rows, key=lambda x: (DAYS_ORDER.get(x[0], 99), x[1]))
 
 def clear_completely():
@@ -54,7 +50,21 @@ def smart_delete(subject, day):
 def smart_cancel(subject, day):
     conn = sqlite3.connect('university.db')
     day_clean = day.strip().capitalize()
-    conn.execute("UPDATE schedule SET is_cancelled = 1 WHERE subject LIKE ? AND day_of_week = ?", (f"%{subject}%", day_clean))
+    search = str(subject).strip()
+    # Якщо бот тупанув і прислав "13", перетворюємо на "13:30"
+    if search == "13": search = "13:30"
+    if search == "15": search = "15:10"
+    
+    query = "UPDATE schedule SET is_cancelled = 1 WHERE (subject LIKE ? OR lesson_time LIKE ?) AND day_of_week = ?"
+    conn.execute(query, (f"%{search}%", f"%{search}%", day_clean))
+    conn.commit()
+    conn.close()
+
+def smart_uncancel(subject, day):
+    conn = sqlite3.connect('university.db')
+    day_clean = day.strip().capitalize()
+    query = "UPDATE schedule SET is_cancelled = 0 WHERE (subject LIKE ? OR lesson_time LIKE ?) AND day_of_week = ?"
+    conn.execute(query, (f"%{subject}%", f"%{subject}%", day_clean))
     conn.commit()
     conn.close()
 
@@ -72,6 +82,7 @@ def add_lesson(subject, day, time_input, teacher=None, location=None, lesson_typ
     pair_num = num_map.get(t_str, t_str)
     final_time = LESSON_TIMES.get(pair_num, time_input)
     
+    # Очищаємо назву предмета від зайвих дужок, якщо вони там були
     clean_subject = re.sub(r'\(.*?\)', '', subject).strip()
     
     conn.execute('''INSERT INTO schedule (subject, day_of_week, lesson_time, teacher, location, is_cancelled, lesson_type)
@@ -90,20 +101,9 @@ def format_schedule_text():
         if day != current_day:
             res += f"\n----------------------------------\n*{day}*\n"
             current_day = day
-        
-        # Використовуємо l_type як він є, бо він уже в дужках
         type_str = f" {l_type}" if l_type and l_type != "None" else ""
         status = " (СКАСОВАНО) ❌" if cancelled == 1 else ""
         res += f"• {subject}{type_str} {time}{status}\n"
         if cancelled == 0:
             res += f"   👨‍🏫 {teacher if teacher else 'Не вказано'} | 📍 {loc if loc else 'ауд. ?'}\n"
     return res + "\n----------------------------------"
-
-def smart_cancel(subject, day):
-    conn = sqlite3.connect('university.db')
-    day_clean = day.strip().capitalize()
-    # Шукаємо по назві АБО по часу пари
-    query = "UPDATE schedule SET is_cancelled = 1 WHERE (subject LIKE ? OR lesson_time LIKE ?) AND day_of_week = ?"
-    conn.execute(query, (f"%{subject}%", f"%{subject}%", day_clean))
-    conn.commit()
-    conn.close()
