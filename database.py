@@ -51,7 +51,6 @@ def smart_cancel(subject, day):
     conn = sqlite3.connect('university.db')
     day_clean = day.strip().capitalize()
     search = str(subject).strip()
-    # Якщо бот тупанув і прислав "13", перетворюємо на "13:30"
     if search == "13": search = "13:30"
     if search == "15": search = "15:10"
     
@@ -71,7 +70,6 @@ def smart_uncancel(subject, day):
 def add_lesson(subject, day, time_input, teacher=None, location=None, lesson_type=None):
     conn = sqlite3.connect('university.db')
     
-    # Форматуємо тип пари: "лекція" -> "(Лекція)"
     formatted_type = ""
     if lesson_type and lesson_type.strip().lower() != "none":
         clean_type = lesson_type.replace("(", "").replace(")", "").strip().capitalize()
@@ -82,7 +80,6 @@ def add_lesson(subject, day, time_input, teacher=None, location=None, lesson_typ
     pair_num = num_map.get(t_str, t_str)
     final_time = LESSON_TIMES.get(pair_num, time_input)
     
-    # Очищаємо назву предмета від зайвих дужок, якщо вони там були
     clean_subject = re.sub(r'\(.*?\)', '', subject).strip()
     
     conn.execute('''INSERT INTO schedule (subject, day_of_week, lesson_time, teacher, location, is_cancelled, lesson_type)
