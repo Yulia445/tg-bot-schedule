@@ -10,6 +10,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+# Імпорт функцій з твого файлу database.py
 from database import (init_db, get_db_schedule, clear_completely, 
                       delete_all_in_day, smart_delete, smart_cancel, 
                       add_lesson, format_schedule_text)
@@ -48,15 +49,21 @@ async def start(m: types.Message):
 @dp.message(F.text == "📚 Розклад")
 async def show_s(m: types.Message):
     await m.answer(format_schedule_text())
+@dp.message(F.sticker)
+async def get_sticker_id(message: types.Message):
+    print(f"STICKER_ID: {message.sticker.file_id}")
+
 
 @dp.message()
 async def handle_ai(message: types.Message):
+    # Лог для перевірки в терміналі VS Code
     print(f"DEBUG: Від {message.from_user.id}: {message.text}")
     
     if message.from_user.id != ADMIN_ID: return
 
     current_sched = str(get_db_schedule())
     
+    # ТУТ ТВІЙ СПИСОК ВИКЛАДАЧІВ (тепер він у промпті, щоб бот не тупив)
     prompt = f"""Ти — Support Bro. Допомагай Юлі з розкладом.
 Твоє завдання: видавати ТІЛЬКИ команди в квадратних дужках.
 
@@ -144,16 +151,31 @@ async def handle_ai(message: types.Message):
                 if line and not line.startswith("["):
                     chat_reply.append(line)
 
+      # 1. Спершу надсилаємо текстову відповідь, якщо вона є
         if chat_reply:
             await message.answer("\n".join(chat_reply))
         
+        # 2. Якщо команда була успішною — оновлюємо розклад через паузу
         if status_executed:
             await asyncio.sleep(0.4)
             await message.answer(format_schedule_text())
+        
+        # 3. А ОСЬ ТУТ: якщо ШІ не зрозумів команду (status_executed == False)
+        # і це не просто кнопка "Розклад", то кидаємо стікер
+        else:
+            stickers = [
+                "CAACAgIAAxkBAAIC7WoDtxORd3mntQp3GAHj-f-HuBcvAALiiwACw9_IScWrBZB_OIoCOwQ", 
+                "CAACAgIAAxkBAAIC7moDt2oZO7J5srfWsRqDYRqSFlz1AALrEQACDhNgSJkBbWV26fB5OwQ"
+            ]
+            import random
+            random_sticker = random.choice(stickers)
+            await message.answer_sticker(random_sticker)
 
     except Exception as e:
         print(f"Помилка: {e}")
         await message.answer(f"Помилка: {e}")
+
+
 
 # --- ЗАПУСК ---
 async def main():
