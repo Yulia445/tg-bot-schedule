@@ -1,184 +1,109 @@
-import asyncio
-import os
+import sqlite3
 import re
-from dotenv import load_dotenv
-from groq import AsyncGroq
 
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+LESSON_TIMES = {
+    "1": "08:30-09:50", "2": "10:00-11:20", "3": "12:00-13:20", "4": "13:30-14:50",
+    "5": "15:10-16:30", "6": "16:40-18:00", "7": "18:10-19:30", "8": "19:40-21:00"
+}
 
-from database import (init_db, get_db_schedule, clear_completely, 
-                      delete_all_in_day, smart_delete, smart_cancel, 
-                      add_lesson, format_schedule_text)
+DAYS_ORDER = {
+    "Понеділок": 1, "Вівторок": 2, "Середа": 3, 
+    "Четвер": 4, "П'ятниця": 5, "Субота": 6, "Неділя": 7
+}
 
-load_dotenv()
+def init_db():
+    conn = sqlite3.connect('university.db')
+    conn.execute("""CREATE TABLE IF NOT EXISTS schedule 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT, day_of_week TEXT, 
+                  lesson_time TEXT, teacher TEXT, location TEXT, is_cancelled INTEGER DEFAULT 0, lesson_type TEXT)""")
+    conn.commit()
+    conn.close()
 
-# --- НАЛАШТУВАННЯ ---
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = 5297726318
+def get_db_schedule():
+    conn = sqlite3.connect('university.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT day_of_week, lesson_time, subject, teacher, location, is_cancelled, lesson_type FROM schedule")
+    rows = cursor.fetchall()
+    conn.close()
+    return sorted(rows, key=lambda x: (DAYS_ORDER.get(x[0], 99), x[1]))
 
-GROQ_API_KEYS = [key.strip() for key in os.getenv("GROQ_API_KEYS", "").split(",") if key.strip()]
-groq_clients = [AsyncGroq(api_key=key) for key in GROQ_API_KEYS]
-current_key_index = 0
+def clear_completely():
+    conn = sqlite3.connect('university.db')
+    conn.execute("DELETE FROM schedule")
+    conn.commit()
+    conn.close()
 
-bot = Bot(token=TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
-dp = Dispatcher()
+def delete_all_in_day(day):
+    conn = sqlite3.connect('university.db')
+    day_clean = day.strip().capitalize()
+    conn.execute("DELETE FROM schedule WHERE day_of_week = ?", (day_clean,))
+    conn.commit()
+    conn.close()
 
-# --- AI LOGIC ---
-async def get_groq_completion(messages):
-    global current_key_index
-    if not groq_clients: return None
-    client = groq_clients[current_key_index]
-    try:
-        return await client.chat.completions.create(model="llama-3.3-70b-versatile", messages=messages)
-    except Exception as e:
-        print(f"Помилка ключа Groq: {e}")
-        current_key_index = (current_key_index + 1) % len(groq_clients)
-        return await get_groq_completion(messages)
+def smart_delete(subject, day):
+    conn = sqlite3.connect('university.db')
+    day_clean = day.strip().capitalize()
+    conn.execute("DELETE FROM schedule WHERE subject LIKE ? AND day_of_week = ?", (f"%{subject}%", day_clean))
+    conn.commit()
+    conn.close()
 
-# --- HANDLERS ---
-@dp.message(Command("start"))
-async def start(m: types.Message):
-    b = ReplyKeyboardBuilder().button(text="📚 Розклад").as_markup(resize_keyboard=True)
-    await m.answer("Бро в строю! 😎 Кажи, що змінити.", reply_markup=b)
-
-@dp.message(F.text == "📚 Розклад")
-async def show_s(m: types.Message):
-    await m.answer(format_schedule_text())
-@dp.message(F.sticker)
-async def get_sticker_id(message: types.Message):
-    print(f"STICKER_ID: {message.sticker.file_id}")
-
-
-@dp.message()
-async def handle_ai(message: types.Message):
-    print(f"DEBUG: Від {message.from_user.id}: {message.text}")
+def smart_cancel(subject, day):
+    conn = sqlite3.connect('university.db')
+    day_clean = day.strip().capitalize()
+    search = str(subject).strip()
+    # Якщо бот тупанув і прислав "13", перетворюємо на "13:30"
+    if search == "13": search = "13:30"
+    if search == "15": search = "15:10"
     
-    if message.from_user.id != ADMIN_ID: return
+    query = "UPDATE schedule SET is_cancelled = 1 WHERE (subject LIKE ? OR lesson_time LIKE ?) AND day_of_week = ?"
+    conn.execute(query, (f"%{search}%", f"%{search}%", day_clean))
+    conn.commit()
+    conn.close()
 
-    current_sched = str(get_db_schedule())
+def smart_uncancel(subject, day):
+    conn = sqlite3.connect('university.db')
+    day_clean = day.strip().capitalize()
+    query = "UPDATE schedule SET is_cancelled = 0 WHERE (subject LIKE ? OR lesson_time LIKE ?) AND day_of_week = ?"
+    conn.execute(query, (f"%{subject}%", f"%{subject}%", day_clean))
+    conn.commit()
+    conn.close()
+
+def add_lesson(subject, day, time_input, teacher=None, location=None, lesson_type=None):
+    conn = sqlite3.connect('university.db')
     
-    prompt = f"""Ти — Support Bro. Допомагай Юлі з розкладом.
-Твоє завдання: видавати ТІЛЬКИ команди в квадратних дужках.
+    # Форматуємо тип пари: "лекція" -> "(Лекція)"
+    formatted_type = ""
+    if lesson_type and lesson_type.strip().lower() != "none":
+        clean_type = lesson_type.replace("(", "").replace(")", "").strip().capitalize()
+        formatted_type = f"({clean_type})"
 
-БАЗА ЗНАНЬ (ВИКЛАДАЧІ):
-- Математичний аналіз -> Дзюба М.В.
-- Інформаційно-комунікаційні технології -> Шкатуляк В.В.
-- Українська мова -> Соловій У.В.
-- Критичне мислення -> Надурак В.В.
-- Основи роботи з нейронними мережами -> Головчук П.В.
-- Основи програмування -> Піцур М.Р.
-- Англійська мова-> Куцела М.М.
+    t_str = str(time_input).lower()
+    num_map = {"перша": "1", "друга": "2", "третя": "3", "четверта": "4", "п'ята": "5", "шоста": "6", "сьома": "7", "восьма": "8"}
+    pair_num = num_map.get(t_str, t_str)
+    final_time = LESSON_TIMES.get(pair_num, time_input)
+    
+    # Очищаємо назву предмета від зайвих дужок, якщо вони там були
+    clean_subject = re.sub(r'\(.*?\)', '', subject).strip()
+    
+    conn.execute('''INSERT INTO schedule (subject, day_of_week, lesson_time, teacher, location, is_cancelled, lesson_type)
+                    VALUES (?, ?, ?, ?, ?, 0, ?)''', 
+                 (clean_subject, day.strip().capitalize(), final_time, teacher, location, formatted_type))
+    conn.commit()
+    conn.close()
 
-ПРАВИЛА:
-1. Якщо Юля каже СКАСУВАТИ пару — використовуй [CANCEL:Предмет:День].
-2. Якщо Юля каже ВИДАЛИТИ пару (геть з бази) — використовуй [DELETE:Предмет:День].
-3. Тип пари (Лекція/Практика) пиши ТІЛЬКИ якщо Юля це згадала. Якщо ні — пиши None.
-4. Якщо викладач не вказаний — візьми з бази знань.
-
-ФОРМАТИ КОМАНД:
-- [ADD:Предмет:День:НомерПари:Викладач:Аудиторія:ТипПари]
-- [CANCEL:Предмет:День]
-- [DELETE:Предмет:День]
-- [DELETE_ALL:День]
-- [CLEAR_EVERYTHING]
-
-КОНТЕКСТ РОЗКЛАДУ: {current_sched}
-Текст Юлі: "{message.text}" """
-
-    try:
-        response = await get_groq_completion([
-            {"role": "system", "content": "Ти — технічний модуль. Відповідай виключно командами."},
-            {"role": "user", "content": prompt}
-        ])
-
-        if not response: return
-
-        cmd_text = response.choices[0].message.content.strip()
-        lines = cmd_text.split('\n')
-        status_executed = False
-        chat_reply = []
-
-        for line in lines:
-            line = line.strip()
-            upper = line.upper()
-
-            if "[CLEAR_EVERYTHING]" in upper:
-                clear_completely()
-                status_executed = True
-                chat_reply.append("🧹 Розклад очищено!")
-            
-            elif "DELETE_ALL:" in upper or "DELETE:ALL:" in upper:
-                try:
-                    day = line.split(":")[-1].strip("[] ")
-                    delete_all_in_day(day)
-                    status_executed = True
-                    chat_reply.append(f"🗑 День {day} видалено")
-                except: pass
-
-            elif "[DELETE:" in upper:
-                try:
-                    p = line.split("[DELETE:")[1].split("]")[0].split(":")
-                    smart_delete(p[0].strip(), p[1].strip())
-                    status_executed = True
-                    chat_reply.append(f"🗑 Видалено: {p[0]}")
-                except: pass
-
-            elif "[CANCEL:" in upper:
-                try:
-                    p = line.split("[CANCEL:")[1].split("]")[0].split(":")
-                    smart_cancel(p[0].strip(), p[1].strip())
-                    status_executed = True
-                    chat_reply.append(f"❌ Скасовано: {p[0]}")
-                except: pass
-
-            elif "[ADD:" in upper:
-                try:
-                    p = line.split("[ADD:")[1].split("]")[0].split(":")
-                    if len(p) >= 5:
-                        l_type = p[5].strip() if len(p) > 5 else "Лекція"
-                        add_lesson(p[0].strip(), p[1].strip(), p[2].strip(), p[3].strip(), p[4].strip(), l_type)
-                        status_executed = True
-                        chat_reply.append(f"✅ Додано: {p[0]}")
-                except: pass
-            else:
-                if line and not line.startswith("["):
-                    chat_reply.append(line)
-
-      # 1. Спершу надсилаємо текстову відповідь, якщо вона є
-        if chat_reply:
-            await message.answer("\n".join(chat_reply))
-        
-        # 2. Якщо команда була успішною — оновлюємо розклад через паузу
-        if status_executed:
-            await asyncio.sleep(0.4)
-            await message.answer(format_schedule_text())
-        
-        # 3. А ОСЬ ТУТ: якщо ШІ не зрозумів команду (status_executed == False)
-        # і це не просто кнопка "Розклад", то кидаємо стікер
-        else:
-            stickers = [
-                "CAACAgIAAxkBAAIC7WoDtxORd3mntQp3GAHj-f-HuBcvAALiiwACw9_IScWrBZB_OIoCOwQ", 
-                "CAACAgIAAxkBAAIC7moDt2oZO7J5srfWsRqDYRqSFlz1AALrEQACDhNgSJkBbWV26fB5OwQ"
-            ]
-            import random
-            random_sticker = random.choice(stickers)
-            await message.answer_sticker(random_sticker)
-
-    except Exception as e:
-        print(f"Помилка: {e}")
-        await message.answer(f"Помилка: {e}")
-
-
-
-# --- ЗАПУСК ---
-async def main():
-    init_db()
-    print("Бро запущений! 🚀")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+def format_schedule_text():
+    rows = get_db_schedule()
+    if not rows: return "Розклад порожній 📭"
+    res = "📅 *ТВІЙ ПОВНИЙ РОЗКЛАД:*\n"
+    current_day = ""
+    for r in rows:
+        day, time, subject, teacher, loc, cancelled, l_type = r
+        if day != current_day:
+            res += f"\n----------------------------------\n*{day}*\n"
+            current_day = day
+        type_str = f" {l_type}" if l_type and l_type != "None" else ""
+        status = " (СКАСОВАНО) ❌" if cancelled == 1 else ""
+        res += f"• {subject}{type_str} {time}{status}\n"
+        if cancelled == 0:
+            res += f"   👨‍🏫 {teacher if teacher else 'Не вказано'} | 📍 {loc if loc else 'ауд. ?'}\n"
+    return res + "\n----------------------------------"
